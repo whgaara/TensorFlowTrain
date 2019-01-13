@@ -6,7 +6,9 @@ from tensorflow.examples.tutorials.mnist import input_data
 
 
 def RNN(x, weights, biases):
+    # inputs = [batch_size, max_time, n_inputs]
     inputs = tf.reshape(x, shape=[-1, max_time, n_inputs])
+    # 定义基本的cell
     lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(lstm_size)
     outputs, final_state = tf.nn.dynamic_rnn(lstm_cell, inputs, dtype=tf.float32)
     results = tf.nn.softmax(tf.matmul(final_state[1], weights) + biases)
