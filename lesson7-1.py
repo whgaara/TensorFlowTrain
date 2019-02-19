@@ -30,6 +30,9 @@ y = tf.placeholder(tf.float32, [None, 10])
 weights = tf.Variable(tf.truncated_normal([lstm_size, n_classes], stddev=0.1))
 biases = tf.Variable(tf.constant(0.1, shape=[n_classes]))
 
+# 这个变量必须在声明了Variable以后再定义
+saver = tf.train.Saver()
+
 prediction = RNN(x, weights, biases)
 loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=prediction))
 train_step = tf.train.AdamOptimizer(1e-4).minimize(loss)
@@ -44,3 +47,5 @@ with tf.Session() as sess:
             sess.run(train_step, feed_dict={x: batch_x, y: batch_y})
         acc = sess.run(accuracy, feed_dict={x: mnist.test.images, y: mnist.test.labels})
         print(acc)
+    # 将训练的模型保存下来，如果要使用训练的结果，可调用saver.restore
+    saver.save(sess, 'net/my_net.ckpt')
