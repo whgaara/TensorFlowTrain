@@ -1,2 +1,5 @@
 /.idea
 /test.py
+/inception_log
+/inception_model
+/net
