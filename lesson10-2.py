@@ -39,6 +39,8 @@ def int64_feature(values):
 
 
 def bytes_feature(values):
+    if not isinstance(values, (tuple, list)):
+        values = [values]
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=values))
 
 
@@ -52,7 +54,7 @@ def image_to_tfexample(image_data, label0, label1, label2, label3):
     }))
 
 
-def _convert_dataset(split_name, filenames, dataset_dir):
+def _convert_dataset(split_name, filenames):
     assert split_name in ['train', 'test']
 
     with tf.Session() as sess:
@@ -61,7 +63,7 @@ def _convert_dataset(split_name, filenames, dataset_dir):
         with tf.python_io.TFRecordWriter(output_filename) as tfrecord_writer:
             for i, filename in enumerate(filenames):
                 try:
-                    sys.stdout.write('\r>>Converting image %d%d' % (i + 1, len(filenames)))
+                    sys.stdout.write('\r>>Converting image %d/%d' % (i + 1, len(filenames)))
                     # 打印完后要手动冲刷缓冲区
                     sys.stdout.flush()
 
@@ -77,8 +79,6 @@ def _convert_dataset(split_name, filenames, dataset_dir):
                     labels = filename.split('\\')[-1][0:4]
                     num_labels = []
                     for j in range(4):
-                        print('\n')
-                        print(filename, labels)
                         num_labels.append(int(labels[j]))
 
                     example = image_to_tfexample(image_data, num_labels[0], num_labels[1], num_labels[2], num_labels[3])
@@ -104,6 +104,6 @@ else:
     testing_filenames = photo_filenames[:_NUM_TEST]
 
     # 数据转换
-    _convert_dataset('train', training_filenames, DATASET_DIR)
-    _convert_dataset('test', testing_filenames, DATASET_DIR)
+    _convert_dataset('train', training_filenames)
+    _convert_dataset('test', testing_filenames)
     print('生成tfrecord文件！')
