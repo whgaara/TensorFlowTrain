@@ -62,20 +62,23 @@ def _convert_dataset(split_name, filenames, dataset_dir):
             for i, filename in enumerate(filenames):
                 try:
                     sys.stdout.write('\r>>Converting image %d%d' % (i + 1, len(filenames)))
+                    # 打印完后要手动冲刷缓冲区
                     sys.stdout.flush()
 
                     # 读取图片
                     image_data = Image.open(filename)
-                    image_data = image_data.resize(224, 224)
+                    image_data = image_data.resize((224, 224))
                     # 灰度化
                     image_data = np.array(image_data.convert('L'))
                     # 将图片转化为bytes
                     image_data = image_data.tobytes()
 
                     # 获取label
-                    labels = filename.split('/')[-1][0:4]
+                    labels = filename.split('\\')[-1][0:4]
                     num_labels = []
                     for j in range(4):
+                        print('\n')
+                        print(filename, labels)
                         num_labels.append(int(labels[j]))
 
                     example = image_to_tfexample(image_data, num_labels[0], num_labels[1], num_labels[2], num_labels[3])
