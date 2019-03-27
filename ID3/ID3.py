@@ -89,10 +89,10 @@ def majorityCnt(classList):
 
 def createTree(dataSet, labels):
     classList = [example[-1] for example in dataSet]
-    # 如果全是一直固定结果就没有计算的必要
+    # 如果全是一样的结果就没有计算的必要，例如['no', 'no', 'no']，此时另一个分支还存在子节点
     if classList.count(classList[0]) == len(classList):
         return classList[0]
-    # 如果只有一个特征，那就直接返回特征最多的那个分类，到最后一层使用
+    # 如果只有一个特征，那就直接返回特征最多的那个分类，到最后一层使用，例如['yes', 'no', 'no']，最后一次分类触发
     if len(dataSet[0]) == 1:
         return majorityCnt(classList)
 
