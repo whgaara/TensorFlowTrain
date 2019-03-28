@@ -35,6 +35,15 @@ def setOfWords2Vec(vocabList, inputSet):
     return returnVec
 
 
+# 词袋模型，就是统计出每种词出现的次数
+def bagOfWords2VecMN(vocabList, inputSet):
+    returnVec = [0] * len(vocabList)
+    for word in inputSet:
+        if word in vocabList:
+            returnVec[vocabList.index(word)] += 1
+    return returnVec
+
+
 def trainNB(trainMatrix, trainCategory):
     numTrainDocs = len(trainMatrix)
     numWords = len(trainMatrix[0])
@@ -72,7 +81,8 @@ def testingNB():
     myVocabList = createVocabList(listOPosts)
     trainMat = []
     for postinDoc in listOPosts:
-        trainMat.append(setOfWords2Vec(myVocabList, postinDoc))
+        # trainMat.append(setOfWords2Vec(myVocabList, postinDoc))
+        trainMat.append(bagOfWords2VecMN(myVocabList, postinDoc))
     p0v, p1v, pAb = trainNB(array(trainMat), array(listClasses))
     testEntry = ['love', 'my', 'dalmation']
     thisDoc = array(setOfWords2Vec(myVocabList, testEntry))
