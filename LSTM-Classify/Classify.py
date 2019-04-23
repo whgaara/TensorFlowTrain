@@ -7,8 +7,8 @@ import pandas
 
 
 def init_data():
-    connect = pymysql.connect(host='10.45.25.50', port=3306, user='root', passwd='root',
-                              db='voc', use_unicode=True, charset="utf8")
+    connect = pymysql.connect(host='', port=, user='', passwd='',
+                              db='', use_unicode=True, charset="utf8")
     cursor = connect.cursor()
     cursor.execute('select result, predict from comment_sentence_new where predict in '
                    '(SELECT three_level FROM base_tag_pool)')
