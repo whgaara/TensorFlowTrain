@@ -7,6 +7,9 @@ import pymysql
 import pandas
 import numpy as np
 from math import ceil
+import os
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
 
 
 def init_data():
@@ -59,15 +62,12 @@ class VOC_LSTM():
                 self.source_data.set_value(i, 'labels_onehot', labels_onehot[i])
 
         # 将单词转成数字
-        content_max_len = max([len(content.split(' ')) for content in self.source_data['content']])
-        self.vocab_processor = learn.preprocessing.VocabularyProcessor(content_max_len)
+        self.content_max_len = max([len(content.split(' ')) for content in self.source_data['content']])
+        self.vocab_processor = learn.preprocessing.VocabularyProcessor(self.content_max_len)
         self.vocab_processor.fit(self.source_data['content'])
         content_num = np.array(list(self.vocab_processor.fit_transform(self.source_data['content'])))
         self.max_time = content_num.shape[1]
         for i, label in enumerate(self.source_data['content']):
-            # list_content_num = list(content_num[i])
-            # while 0 in list_content_num:
-            #     list_content_num.remove(0)
             self.source_data.set_value(i, 'word2vec', content_num[i])
 
     def split_data(self):
@@ -85,17 +85,8 @@ class VOC_LSTM():
             for j in range(batch_count):
                 yield self.train.iloc[j*VOC_LSTM.batch_size:min((j+1)*VOC_LSTM.batch_size, len(self.train))]
 
-    def __lstm_cell(self, input, weights, biases, max_time, n_inputs, num_units):
-        s = np.array(input)
-        input_embedding = tf.nn.embedding_lookup(self.embeddings, np.array(input))
-        inputs = tf.reshape(input_embedding, shape=[-1, max_time, n_inputs])
-        lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units)
-        outputs, final_state = tf.nn.dynamic_rnn(lstm_cell, inputs, dtype=tf.float32)
-        results = tf.nn.softmax(tf.matmul(final_state[1], weights) + biases)
-        return results
-
     def lstm_model(self):
-        x = tf.placeholder(tf.float32, [None, None, VOC_LSTM.embedding_size])
+        x = tf.placeholder(tf.int32, [None, self.content_max_len])
         y = tf.placeholder(tf.int32, [None, self.num_classes])
 
         weights = tf.Variable(tf.truncated_normal([VOC_LSTM.num_units, self.num_classes], stddev=0.1))
@@ -103,10 +94,16 @@ class VOC_LSTM():
 
         saver = tf.train.Saver()
 
+        # embedding
         vocab_size = len(self.vocab_processor.vocabulary_)
         self.embeddings = tf.Variable(tf.random_uniform([vocab_size, VOC_LSTM.embedding_size], -1.0, 1.0))
+        input_embedding = tf.nn.embedding_lookup(self.embeddings, x)
+        inputs = tf.reshape(input_embedding, shape=[-1, self.content_max_len, VOC_LSTM.embedding_size])
 
-        prediction = self.__lstm_cell(x, weights, biases, self.max_time, VOC_LSTM.embedding_size, VOC_LSTM.num_units)
+        # train
+        lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(VOC_LSTM.num_units)
+        outputs, final_state = tf.nn.dynamic_rnn(lstm_cell, inputs, dtype=tf.float32)
+        prediction = tf.nn.softmax(tf.matmul(final_state[1], weights) + biases)
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=prediction))
         train_step = tf.train.AdamOptimizer(1e-4).minimize(loss)
         correct_prediction = tf.equal(tf.arg_max(prediction, 1), tf.arg_max(y, 1))
@@ -116,16 +113,13 @@ class VOC_LSTM():
             sess.run(tf.global_variables_initializer())
             for epoch in range(VOC_LSTM.epoch_count):
                 for batch in self.__train_batch_iter():
-                    batch_word2vec = batch['word2vec']
-                    batch_labels = batch['labels_onehot']
-                    # embedding
-                    # input_embedding = tf.nn.embedding_lookup(self.embeddings, batch_word2vec.apply(pandas.Series).values)
+                    batch_word2vec = batch['word2vec'].apply(pandas.Series).values
+                    batch_labels = batch['labels_onehot'].apply(pandas.Series).values
                     sess.run(train_step, feed_dict={x: batch_word2vec, y: batch_labels})
                 # test
-                test_batch_word2vec = self.test['word2vec']
-                test_batch_labels = self.test['labels_onehot']
-                test_embedding = tf.nn.embedding_lookup(self.embeddings, test_batch_word2vec.apply(pandas.Series).values)
-                acc = sess.run(accuracy, feed_dict={x: test_embedding, y: test_batch_labels})
+                test_batch_word2vec = self.test['word2vec'].apply(pandas.Series).values
+                test_batch_labels = self.test['labels_onehot'].apply(pandas.Series).values
+                acc = sess.run(accuracy, feed_dict={x: test_batch_word2vec, y: test_batch_labels})
                 print(acc)
             # saver.save(sess, 'model/my_net.ckpt')
 
@@ -135,16 +129,3 @@ if __name__ == '__main__':
     lc.vectorize()
     lc.split_data()
     lc.lstm_model()
-
-    # w = np.array([[2, 2], [3, 1]])
-    # x = pandas.Series([[0, 1], [1, 0]])
-    # y = x.apply(pandas.Series)
-    # print(y.values)
-    # y = x.as_matrix()
-    # print(np.array(y))
-    # with tf.Session() as sess:
-    #     print(sess.run(tf.nn.embedding_lookup(w, y)))
-
-
-
-
