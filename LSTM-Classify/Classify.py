@@ -105,9 +105,11 @@ class VOC_LSTM():
 
         # train
         outputs, final_state = tf.nn.dynamic_rnn(lstm_cell, inputs, dtype=tf.float32)
-        prediction = tf.nn.softmax(tf.matmul(final_state[1], weights) + biases)
+        prediction = tf.matmul(final_state[1], weights) + biases
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=prediction))
         train_step = tf.train.AdamOptimizer(1e-3).minimize(loss)
+
+        # test
         correct_prediction = tf.equal(tf.arg_max(prediction, 1), tf.arg_max(y, 1))
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
@@ -123,8 +125,23 @@ class VOC_LSTM():
                 test_batch_labels = self.test['labels_onehot'].apply(pandas.Series).values
                 acc = sess.run(accuracy, feed_dict={x: test_batch_word2vec, y: test_batch_labels})
                 print(acc)
+
+                # verify
+                # tmp = sess.run(tf.arg_max(tf.nn.softmax(prediction), 1), feed_dict={x: test_batch_word2vec, y: test_batch_labels})
+                # tmp_y = sess.run(tf.arg_max(y, 1), feed_dict={x: test_batch_word2vec, y: test_batch_labels})
+                # for i in tmp:
+                    # df = self.source_data[['labels', 'labels_num']].drop_duplicates()
+                    # print(df[df['labels_num'] == i]['labels'])
+                # for i in zip(tmp, tmp_y):
+                #     print(i)
+                # print('\n')
+                # pass
             saver.save(sess, 'model/my_net.ckpt')
 
+    def validate(self):
+        sess = tf.Session()
+        saver = tf.train.Saver()
+        saver.restore(sess, "/model/my_net.ckpt")
 
 if __name__ == '__main__':
     lc = VOC_LSTM()
