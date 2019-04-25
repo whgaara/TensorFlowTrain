@@ -7,9 +7,8 @@ import pymysql
 import pandas
 import numpy as np
 from math import ceil
-import os
-
-os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
+# import os
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
 
 
 def init_data():
@@ -31,7 +30,7 @@ class VOC_LSTM():
     num_units = 100
 
     def __init__(self):
-        self.source_data = pandas.read_csv('data_lite.csv', encoding='utf-8')
+        self.source_data = pandas.read_csv('data.csv', encoding='utf-8')
         self.source_data['labels_num'] = 0
         self.count_labels = len(set(self.source_data['labels']))
         self.source_data['labels_onehot'] = None
@@ -62,7 +61,7 @@ class VOC_LSTM():
                 self.source_data.set_value(i, 'labels_onehot', labels_onehot[i])
 
         # 将单词转成数字
-        self.content_max_len = max([len(content.split(' ')) for content in self.source_data['content']])
+        self.content_max_len = max([len(str(content).split(' ')) for content in self.source_data['content']])
         self.vocab_processor = learn.preprocessing.VocabularyProcessor(self.content_max_len)
         self.vocab_processor.fit(self.source_data['content'])
         content_num = np.array(list(self.vocab_processor.fit_transform(self.source_data['content'])))
@@ -121,7 +120,7 @@ class VOC_LSTM():
                 test_batch_labels = self.test['labels_onehot'].apply(pandas.Series).values
                 acc = sess.run(accuracy, feed_dict={x: test_batch_word2vec, y: test_batch_labels})
                 print(acc)
-            # saver.save(sess, 'model/my_net.ckpt')
+            saver.save(sess, 'model/my_net.ckpt')
 
 
 if __name__ == '__main__':
