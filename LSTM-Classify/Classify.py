@@ -107,7 +107,7 @@ class VOC_LSTM():
         outputs, final_state = tf.nn.dynamic_rnn(lstm_cell, inputs, dtype=tf.float32)
         prediction = tf.nn.softmax(tf.matmul(final_state[1], weights) + biases)
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=prediction))
-        train_step = tf.train.AdamOptimizer(1e-4).minimize(loss)
+        train_step = tf.train.AdamOptimizer(1e-3).minimize(loss)
         correct_prediction = tf.equal(tf.arg_max(prediction, 1), tf.arg_max(y, 1))
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
