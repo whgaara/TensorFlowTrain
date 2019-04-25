@@ -99,8 +99,11 @@ class VOC_LSTM():
         input_embedding = tf.nn.embedding_lookup(self.embeddings, x)
         inputs = tf.reshape(input_embedding, shape=[-1, self.content_max_len, VOC_LSTM.embedding_size])
 
+        # dropout
+        cell = tf.nn.rnn_cell.BasicLSTMCell(VOC_LSTM.num_units)
+        lstm_cell = tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=0.7, output_keep_prob=0.7)
+
         # train
-        lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(VOC_LSTM.num_units)
         outputs, final_state = tf.nn.dynamic_rnn(lstm_cell, inputs, dtype=tf.float32)
         prediction = tf.nn.softmax(tf.matmul(final_state[1], weights) + biases)
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=prediction))
