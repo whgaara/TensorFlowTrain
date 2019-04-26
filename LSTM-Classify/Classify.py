@@ -30,6 +30,7 @@ class VOC_LSTM():
     embedding_size = 200
     num_units = 100
     train_rate = 0.9
+    random_seed = 2007
 
     def __init__(self):
         self.source_data = pandas.read_csv('data_lite.csv', encoding='utf-8')
@@ -97,10 +98,10 @@ class VOC_LSTM():
 
         # embedding
         vocab_size = len(self.vocab_processor.vocabulary_)
-        self.embeddings = tf.Variable(tf.random_uniform([vocab_size, VOC_LSTM.embedding_size], -1.0, 1.0),
-                                      name='embeddings')
-        input_embedding = tf.nn.embedding_lookup(self.embeddings, x)
-        inputs = tf.reshape(input_embedding, shape=[-1, self.content_max_len, VOC_LSTM.embedding_size])
+        embeddings = tf.Variable(tf.random_uniform([vocab_size, VOC_LSTM.embedding_size], -1.0, 1.0), name='embeddings')
+        input_embedding = tf.nn.embedding_lookup(embeddings, x, name='input_embedding')
+        # inputs = tf.reshape(input_embedding, shape=[-1, self.content_max_len, VOC_LSTM.embedding_size])
+        tf.set_random_seed(VOC_LSTM.random_seed)
 
         # dropout
         cell = tf.nn.rnn_cell.BasicLSTMCell(VOC_LSTM.num_units)
@@ -108,7 +109,7 @@ class VOC_LSTM():
         lstm_cell = tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=1.0, output_keep_prob=0.7)
 
         # train
-        outputs, final_state = tf.nn.dynamic_rnn(lstm_cell, inputs, dtype=tf.float32)
+        outputs, final_state = tf.nn.dynamic_rnn(lstm_cell, input_embedding, dtype=tf.float32)
         prediction = tf.matmul(final_state[1], weights) + biases
         prediction_num = tf.arg_max(prediction, 1, name='prediction_num')
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=prediction))
@@ -156,9 +157,9 @@ class VOC_LSTM():
         saver = tf.train.import_meta_graph('model/my_net.ckpt.meta')
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
+            sess.run(tf.local_variables_initializer())
             saver.restore(sess, "model/my_net.ckpt")
-            prediction_num = sess.run(tf.get_default_graph().get_tensor_by_name('prediction_num:0'),
-                                      feed_dict={'x:0': word2nums})
+            prediction_num = sess.run('prediction_num:0', feed_dict={'x:0': word2nums})
             for i, content in enumerate(discrete_content):
                 label = labels_dict[labels_dict['labels_num'] == prediction_num[i]]['labels']
                 print(content, label)
@@ -170,4 +171,5 @@ if __name__ == '__main__':
     # lc.split_data()
     # lc.record_info()
     # lc.lstm_model()
+    tf.set_random_seed(VOC_LSTM.random_seed)
     lc.use_model('舒服')
