@@ -88,6 +88,7 @@ class VOC_LSTM():
                 yield self.train.iloc[j*VOC_LSTM.batch_size:min((j+1)*VOC_LSTM.batch_size, len(self.train))]
 
     def lstm_model(self):
+        tf.set_random_seed(2007)
         x = tf.placeholder(tf.int32, [None, self.content_max_len], name='x')
         y = tf.placeholder(tf.int32, [None, self.num_classes], name='y')
 
@@ -101,7 +102,6 @@ class VOC_LSTM():
         embeddings = tf.Variable(tf.random_uniform([vocab_size, VOC_LSTM.embedding_size], -1.0, 1.0), name='embeddings')
         input_embedding = tf.nn.embedding_lookup(embeddings, x, name='input_embedding')
         # inputs = tf.reshape(input_embedding, shape=[-1, self.content_max_len, VOC_LSTM.embedding_size])
-        tf.set_random_seed(VOC_LSTM.random_seed)
 
         # dropout
         cell = tf.nn.rnn_cell.BasicLSTMCell(VOC_LSTM.num_units)
@@ -156,10 +156,12 @@ class VOC_LSTM():
         # 载入模型参数
         saver = tf.train.import_meta_graph('model/my_net.ckpt.meta')
         with tf.Session() as sess:
+            tf.set_random_seed(2007)
             sess.run(tf.global_variables_initializer())
             sess.run(tf.local_variables_initializer())
             saver.restore(sess, "model/my_net.ckpt")
             prediction_num = sess.run('prediction_num:0', feed_dict={'x:0': word2nums})
+            inputs = sess.run('input_embedding:0', feed_dict={'x:0': word2nums})
             for i, content in enumerate(discrete_content):
                 label = labels_dict[labels_dict['labels_num'] == prediction_num[i]]['labels']
                 print(content, label)
@@ -171,5 +173,4 @@ if __name__ == '__main__':
     # lc.split_data()
     # lc.record_info()
     # lc.lstm_model()
-    tf.set_random_seed(VOC_LSTM.random_seed)
-    lc.use_model('舒服')
+    lc.use_model('舒适')
