@@ -7,6 +7,7 @@ import pymysql
 import pandas
 import numpy as np
 from math import ceil
+import pickle
 # import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
 
@@ -25,12 +26,13 @@ def init_data():
 class VOC_LSTM():
 
     batch_size = 100
-    epoch_count = 30
+    epoch_count = 10
     embedding_size = 200
     num_units = 100
+    train_rate = 0.9
 
     def __init__(self):
-        self.source_data = pandas.read_csv('data.csv', encoding='utf-8')
+        self.source_data = pandas.read_csv('data_lite.csv', encoding='utf-8')
         self.source_data['labels_num'] = 0
         self.count_labels = len(set(self.source_data['labels']))
         self.source_data['labels_onehot'] = None
@@ -71,7 +73,7 @@ class VOC_LSTM():
 
     def split_data(self):
         # 切分训练集和测试集
-        train_count = int(len(self.source_data) * 0.9)
+        train_count = int(len(self.source_data) * VOC_LSTM.train_rate)
         shuffle_index = np.random.permutation(np.arange(len(self.source_data)))
         self.shuffle_data = self.source_data.loc[shuffle_index]
         self.train = self.shuffle_data.iloc[:train_count]
@@ -85,33 +87,36 @@ class VOC_LSTM():
                 yield self.train.iloc[j*VOC_LSTM.batch_size:min((j+1)*VOC_LSTM.batch_size, len(self.train))]
 
     def lstm_model(self):
-        x = tf.placeholder(tf.int32, [None, self.content_max_len])
-        y = tf.placeholder(tf.int32, [None, self.num_classes])
+        x = tf.placeholder(tf.int32, [None, self.content_max_len], name='x')
+        y = tf.placeholder(tf.int32, [None, self.num_classes], name='y')
 
-        weights = tf.Variable(tf.truncated_normal([VOC_LSTM.num_units, self.num_classes], stddev=0.1))
-        biases = tf.Variable(tf.constant(0.1, shape=[self.num_classes]))
+        weights = tf.Variable(tf.truncated_normal([VOC_LSTM.num_units, self.num_classes], stddev=0.1), name='weights')
+        biases = tf.Variable(tf.constant(0.1, shape=[self.num_classes]), name='biases')
 
         saver = tf.train.Saver()
 
         # embedding
         vocab_size = len(self.vocab_processor.vocabulary_)
-        self.embeddings = tf.Variable(tf.random_uniform([vocab_size, VOC_LSTM.embedding_size], -1.0, 1.0))
+        self.embeddings = tf.Variable(tf.random_uniform([vocab_size, VOC_LSTM.embedding_size], -1.0, 1.0),
+                                      name='embeddings')
         input_embedding = tf.nn.embedding_lookup(self.embeddings, x)
         inputs = tf.reshape(input_embedding, shape=[-1, self.content_max_len, VOC_LSTM.embedding_size])
 
         # dropout
         cell = tf.nn.rnn_cell.BasicLSTMCell(VOC_LSTM.num_units)
-        lstm_cell = tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=0.7, output_keep_prob=0.7)
+        # cell = tf.nn.rnn_cell.GRUCell(VOC_LSTM.num_units)
+        lstm_cell = tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=1.0, output_keep_prob=0.7)
 
         # train
         outputs, final_state = tf.nn.dynamic_rnn(lstm_cell, inputs, dtype=tf.float32)
         prediction = tf.matmul(final_state[1], weights) + biases
+        prediction_num = tf.arg_max(prediction, 1, name='prediction_num')
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=prediction))
         train_step = tf.train.AdamOptimizer(1e-3).minimize(loss)
 
         # test
-        correct_prediction = tf.equal(tf.arg_max(prediction, 1), tf.arg_max(y, 1))
-        accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+        correct_prediction = tf.equal(prediction_num, tf.arg_max(y, 1), name='correct_prediction')
+        accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='accuracy')
 
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
@@ -125,26 +130,44 @@ class VOC_LSTM():
                 test_batch_labels = self.test['labels_onehot'].apply(pandas.Series).values
                 acc = sess.run(accuracy, feed_dict={x: test_batch_word2vec, y: test_batch_labels})
                 print(acc)
-
-                # verify
-                # tmp = sess.run(tf.arg_max(tf.nn.softmax(prediction), 1), feed_dict={x: test_batch_word2vec, y: test_batch_labels})
-                # tmp_y = sess.run(tf.arg_max(y, 1), feed_dict={x: test_batch_word2vec, y: test_batch_labels})
-                # for i in tmp:
-                    # df = self.source_data[['labels', 'labels_num']].drop_duplicates()
-                    # print(df[df['labels_num'] == i]['labels'])
-                # for i in zip(tmp, tmp_y):
-                #     print(i)
-                # print('\n')
-                # pass
             saver.save(sess, 'model/my_net.ckpt')
 
-    def validate(self):
-        sess = tf.Session()
-        saver = tf.train.Saver()
-        saver.restore(sess, "/model/my_net.ckpt")
+    def record_info(self):
+        # 记录本模型各个标签对应的num
+        labels_dict = self.source_data[['labels', 'labels_num']].drop_duplicates()
+        pickle.dump(labels_dict, open('reference/labels_dict', 'wb'))
+
+        # 记录本模型各个单词对应的数字
+        pickle.dump(self.vocab_processor, open('reference/vocab_processor', 'wb'))
+
+    def use_model(self, discrete_content):
+        # 载入标签字典
+        labels_dict = pickle.load(open('reference/labels_dict', 'rb'))
+
+        # 载入vocab_processor
+        vocab_processor = pickle.load(open('reference/vocab_processor', 'rb'))
+
+        # 将分完词的content转成对应数字
+        if isinstance(discrete_content, str):
+            discrete_content = [discrete_content]
+        word2nums = list(vocab_processor.fit_transform(discrete_content))
+
+        # 载入模型参数
+        saver = tf.train.import_meta_graph('model/my_net.ckpt.meta')
+        with tf.Session() as sess:
+            sess.run(tf.global_variables_initializer())
+            saver.restore(sess, "model/my_net.ckpt")
+            prediction_num = sess.run(tf.get_default_graph().get_tensor_by_name('prediction_num:0'),
+                                      feed_dict={'x:0': word2nums})
+            for i, content in enumerate(discrete_content):
+                label = labels_dict[labels_dict['labels_num'] == prediction_num[i]]['labels']
+                print(content, label)
+
 
 if __name__ == '__main__':
     lc = VOC_LSTM()
-    lc.vectorize()
-    lc.split_data()
-    lc.lstm_model()
+    # lc.vectorize()
+    # lc.split_data()
+    # lc.record_info()
+    # lc.lstm_model()
+    lc.use_model('舒服')
