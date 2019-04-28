@@ -25,7 +25,7 @@ def init_data():
 
 class VOC_LSTM():
 
-    batch_size = 100
+    batch_size = 256
     epoch_count = 20
     embedding_size = 200
     num_units = 100
@@ -89,7 +89,7 @@ class VOC_LSTM():
             for j in range(batch_count):
                 yield self.train.iloc[j*VOC_LSTM.batch_size:min((j+1)*VOC_LSTM.batch_size, len(self.train))]
 
-    def train(self):
+    def train_model(self):
         x = tf.placeholder(tf.int32, [None, self.content_max_len], name='x')
         y = tf.placeholder(tf.int32, [None, self.num_classes], name='y')
 
@@ -165,8 +165,8 @@ class VOC_LSTM():
 
 if __name__ == '__main__':
     lc = VOC_LSTM()
-    # lc.vectorize()
-    # lc.split_data()
-    # lc.record_info()
-    # lc.train()
-    lc.use_model(np.array(['天 到 ','买 有点 大 ','破 裤子 还 不能 处理','合适','码 正好 ','天 就 到 ','腰围 裤 长 穿 很 合适 ','鞋 非常 合适 ','多 性价比 非常 很 高 ','码 合适 裤子 有 弹性','赞 ','脚 码 正好 ','活动 也 给力 ']))
+    lc.vectorize()
+    lc.split_data()
+    lc.record_info()
+    lc.train_model()
+    # lc.use_model(np.array(['天 到 ','买 有点 大 ','破 裤子 还 不能 处理','合适','码 正好 ','天 就 到 ','腰围 裤 长 穿 很 合适 ','鞋 非常 合适 ','多 性价比 非常 很 高 ','码 合适 裤子 有 弹性','赞 ','脚 码 正好 ','活动 也 给力 ']))
