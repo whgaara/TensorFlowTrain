@@ -11,6 +11,7 @@ import tensorflow as tf
 from math import ceil
 from tensorflow.contrib import learn
 from keras.utils import to_categorical
+from tensorflow.python import pywrap_tensorflow
 
 
 class Config(object):
@@ -25,6 +26,7 @@ class Config(object):
     model_name = 'my_net.ckpt'
     graph_path = os.path.join(path, graph_name)
     model_path = os.path.join(path, model_name)
+    data_path = os.path.join('data', 'data_lite.csv')
 
     @classmethod
     def init_data(cls):
@@ -39,8 +41,8 @@ class Config(object):
 
 
 class VocLstm(object):
+    epoch_count = 10
     batch_size = 256
-    epoch_count = 20
     embedding_size = 200
     num_units = 100
     train_rate = 0.9
@@ -48,7 +50,7 @@ class VocLstm(object):
 
     def __init__(self):
         # read data
-        self.source_data = pandas.read_csv('data.csv', encoding='utf-8')
+        self.source_data = pandas.read_csv(Config.data_path, encoding='utf-8')
         self.source_data['labels_num'] = 0
         self.source_data['labels_onehot'] = None
         self.source_data['word2vec'] = None
@@ -132,29 +134,33 @@ class VocLstm(object):
             return tf.nn.rnn_cell.GRUCell(VocLstm.num_units)
 
     def train_model(self):
-        x = tf.placeholder(tf.int32, [None, self.content_max_len], name='x')
-        y = tf.placeholder(tf.int32, [None, self.num_classes], name='y')
-        weights = tf.Variable(tf.truncated_normal([VocLstm.num_units, self.num_classes], stddev=0.1), name='weights')
-        biases = tf.Variable(tf.constant(0.1, shape=[self.num_classes]), name='biases')
-        dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
+        with tf.name_scope('initial'):
+            x = tf.placeholder(tf.int32, [None, self.content_max_len], name='x')
+            y = tf.placeholder(tf.int32, [None, self.num_classes], name='y')
+            weights = tf.Variable(tf.truncated_normal([VocLstm.num_units, self.num_classes], stddev=0.1), name='weights')
+            biases = tf.Variable(tf.constant(0.1, shape=[self.num_classes]), name='biases')
+            dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
 
         # embedding
-        vocab_size = len(self.vocab_processor.vocabulary_)
-        embeddings = tf.Variable(tf.random_uniform([vocab_size, VocLstm.embedding_size], -1.0, 1.0), name='embeddings')
-        input_embedding = tf.nn.embedding_lookup(embeddings, x, name='input_embedding')
+        with tf.name_scope('embedding'):
+            vocab_size = len(self.vocab_processor.vocabulary_)
+            embeddings = tf.Variable(tf.random_uniform([vocab_size, VocLstm.embedding_size], -1.0, 1.0), name='embeddings')
+            input_embedding = tf.nn.embedding_lookup(embeddings, x, name='input_embedding')
 
         # train
-        # lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(VocLstm.num_units)
-        # lstm_cell = tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=1.0, output_keep_prob=1.0)
-        outputs, final_state = tf.nn.dynamic_rnn(self.rnn_cell, input_embedding, dtype=tf.float32)
-        prediction = tf.matmul(final_state[1], weights) + biases
-        prediction_num = tf.arg_max(tf.nn.softmax(prediction), 1, name='prediction_num')
-        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=prediction))
-        train_step = tf.train.AdamOptimizer(1e-3).minimize(loss)
+        with tf.name_scope('train'):
+            # lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(VocLstm.num_units)
+            # lstm_cell = tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=1.0, output_keep_prob=1.0)
+            outputs, final_state = tf.nn.dynamic_rnn(self.rnn_cell, input_embedding, dtype=tf.float32)
+            prediction = tf.matmul(final_state[1], weights) + biases
+            prediction_num = tf.arg_max(tf.nn.softmax(prediction), 1, name='prediction_num')
+            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=y, logits=prediction))
+            train_step = tf.train.AdamOptimizer(1e-3).minimize(loss)
 
         # test
-        correct_prediction = tf.equal(prediction_num, tf.arg_max(y, 1), name='correct_prediction')
-        accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='accuracy')
+        with tf.name_scope('test'):
+            correct_prediction = tf.equal(prediction_num, tf.arg_max(y, 1), name='correct_prediction')
+            accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='accuracy')
 
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
@@ -173,10 +179,18 @@ class VocLstm(object):
                     saver.save(sess, Config.model_path)
                     VocLstm.best_acc = acc
 
+    def read_tensor(self):
+        reader = pywrap_tensorflow.NewCheckpointReader(Config.model_path)
+        var_to_shape_map = reader.get_variable_to_shape_map()
+        for key in var_to_shape_map:
+            print("tensor_name: ", key)
+
     def use_model(self, discrete_content):
         """
         load labels-dict
         """
+        # self.read_tensor()
+
         labels_dict = pickle.load(open('reference/labels_dict', 'rb'))
 
         # load vocab_processor
@@ -191,7 +205,7 @@ class VocLstm(object):
         sess = tf.Session()
         saver = tf.train.import_meta_graph(Config.graph_path)
         saver.restore(sess, Config.model_path)
-        prediction_num = sess.run('prediction_num:0', feed_dict={'x:0': word2nums})
+        prediction_num = sess.run('train/prediction_num:0', feed_dict={'initial/x:0': word2nums})
         for i, content in enumerate(discrete_content):
             label = labels_dict[labels_dict['labels_num'] == prediction_num[i]]['labels']
             print(content, label)
@@ -199,8 +213,8 @@ class VocLstm(object):
 
 if __name__ == '__main__':
     lc = VocLstm()
-    lc.initialize_data()
-    lc.train_model()
+    # lc.initialize_data()
+    # lc.train_model()
     lc.use_model(np.array(['天 到 ', '买 有点 大 ', '破 裤子 还 不能 处理', '合适', '码 正好 ', '天 就 到 ',
                            '腰围 裤 长 穿 很 合适 ', '鞋 非常 合适 ', '多 性价比 非常 很 高 ',
                            '码 合适 裤子 有 弹性', '赞 ', '脚 码 正好 ', '活动 也 给力 ']))
