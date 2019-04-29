@@ -29,7 +29,7 @@ class Config(object):
     model_path = os.path.join(path, model_name)
     data_path = os.path.join('data', 'data_lite.csv')
 
-    TrainSwtch = True
+    TrainSwtch = False
 
     @classmethod
     def init_data(cls):
@@ -51,7 +51,7 @@ class VocLstm(object):
     train_rate = 0.9
     dense_num = 200
     best_acc = 0.0
-    judgement = 0.8
+    judgement = 0.4
     dropout_keep_prob = 1.0
 
     def __init__(self):
@@ -173,7 +173,7 @@ class VocLstm(object):
     def train_model(self):
         with tf.name_scope('initial'):
             x = tf.placeholder(tf.int32, [None, self.content_max_len], name='x')
-            y = tf.placeholder(tf.int32, [None, self.num_classes], name='y')
+            y = tf.placeholder(tf.float32, [None, self.num_classes], name='y')
             weights_1 = tf.Variable(tf.truncated_normal([VocLstm.num_units, VocLstm.dense_num], stddev=0.1),
                                     name='weights_1')
             biases_1 = tf.Variable(tf.constant(0.1, shape=[VocLstm.dense_num]), name='biases_1')
@@ -196,12 +196,13 @@ class VocLstm(object):
             prediction1 = tf.nn.relu(tf.matmul(final_state[1], weights_1) + biases_1)
             prediction1_dropout = tf.nn.dropout(prediction1, dropout_keep_prob)
             prediction2 = tf.matmul(prediction1_dropout, weights_2) + biases_2
-            prediction_num = tf.arg_max(tf.nn.softmax(prediction2), 1, name='prediction_num')
-            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=y, logits=prediction2))
+            prediction_result = tf.nn.sigmoid(prediction2, name='prediction_result')
+            loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=y, logits=prediction2)
             train_step = tf.train.AdamOptimizer(1e-3).minimize(loss)
 
         # test
         with tf.name_scope('test'):
+            prediction_num = tf.arg_max(tf.nn.softmax(prediction2), 1, name='prediction_num')
             correct_prediction = tf.equal(prediction_num, tf.arg_max(y, 1), name='correct_prediction')
             accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='accuracy')
 
@@ -218,9 +219,10 @@ class VocLstm(object):
                 # test
                 test_batch_word2vec = self.test['word2vec'].apply(pandas.Series).values
                 test_batch_labels = self.test['labels_onehot'].apply(pandas.Series).values
+                pre = sess.run(prediction_result, feed_dict={x: test_batch_word2vec, y: test_batch_labels,
+                                                             dropout_keep_prob: 1.0})
                 acc = sess.run(accuracy, feed_dict={x: test_batch_word2vec, y: test_batch_labels,
                                                     dropout_keep_prob: 1.0})
-
                 print('this is the %sth train, %s, acc:' % (epoch + 1, self.current_time), acc)
                 if acc > VocLstm.best_acc:
                     saver.save(sess, Config.model_path)
@@ -252,18 +254,21 @@ class Inference(object):
         word2nums = list(self.vocab_processor.fit_transform(content))
 
         # get prediction info
-        prediction_value = self.sess.run('train/add_1:0',
-                                         feed_dict={'initial/x:0': word2nums, 'initial/dropout_keep_prob:0': 1.0})
-        prediction_softmax = self.sess.run(tf.nn.softmax(prediction_value))
-        prediction_num = self.sess.run('train/prediction_num:0',
-                                       feed_dict={'initial/x:0': word2nums, 'initial/dropout_keep_prob:0': 1.0})
-
-        for i, content in enumerate(content):
-            if max(prediction_softmax[i]) < VocLstm.judgement:
-                print(content, '未匹配')
+        prediction_result = self.sess.run('train/prediction_result:0',
+                                          feed_dict={'initial/x:0': word2nums, 'initial/dropout_keep_prob:0': 1.0})
+        for i, sub_content in enumerate(content):
+            label_num = []
+            label_list = []
+            for j, possibility in enumerate(prediction_result[i]):
+                if possibility > VocLstm.judgement:
+                    label_num.append(j)
+            if not len(label_num):
+                print(sub_content, '未匹配')
                 continue
-            label = self.labels_dict[self.labels_dict['labels_num'] == prediction_num[i]]['labels']
-            print(content, label)
+            for label in label_num:
+                label = self.labels_dict[self.labels_dict['labels_num'] == label]['labels']
+                label_list.append(label)
+            print(sub_content, label_list)
 
 
 if __name__ == '__main__':
