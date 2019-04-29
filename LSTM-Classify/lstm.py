@@ -28,6 +28,8 @@ class Config(object):
     model_path = os.path.join(path, model_name)
     data_path = os.path.join('data', 'data_lite.csv')
 
+    TrainSwtch = False
+
     @classmethod
     def init_data(cls):
         connect = pymysql.connect(host=Config.host, port=Config.port, user=Config.user, passwd=Config.password,
@@ -137,19 +139,20 @@ class VocLstm(object):
         with tf.name_scope('initial'):
             x = tf.placeholder(tf.int32, [None, self.content_max_len], name='x')
             y = tf.placeholder(tf.int32, [None, self.num_classes], name='y')
-            weights = tf.Variable(tf.truncated_normal([VocLstm.num_units, self.num_classes], stddev=0.1), name='weights')
+            weights = tf.Variable(tf.truncated_normal([VocLstm.num_units, self.num_classes], stddev=0.1),
+                                  name='weights')
             biases = tf.Variable(tf.constant(0.1, shape=[self.num_classes]), name='biases')
             dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
 
         # embedding
         with tf.name_scope('embedding'):
             vocab_size = len(self.vocab_processor.vocabulary_)
-            embeddings = tf.Variable(tf.random_uniform([vocab_size, VocLstm.embedding_size], -1.0, 1.0), name='embeddings')
+            embeddings = tf.Variable(tf.random_uniform([vocab_size, VocLstm.embedding_size], -1.0, 1.0),
+                                     name='embeddings')
             input_embedding = tf.nn.embedding_lookup(embeddings, x, name='input_embedding')
 
         # train
         with tf.name_scope('train'):
-            # lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(VocLstm.num_units)
             # lstm_cell = tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=1.0, output_keep_prob=1.0)
             outputs, final_state = tf.nn.dynamic_rnn(self.rnn_cell, input_embedding, dtype=tf.float32)
             prediction = tf.matmul(final_state[1], weights) + biases
@@ -179,21 +182,22 @@ class VocLstm(object):
                     saver.save(sess, Config.model_path)
                     VocLstm.best_acc = acc
 
-    def read_tensor(self):
+    @staticmethod
+    def read_tensor():
         reader = pywrap_tensorflow.NewCheckpointReader(Config.model_path)
         var_to_shape_map = reader.get_variable_to_shape_map()
         for key in var_to_shape_map:
             print("tensor_name: ", key)
 
-    def use_model(self, discrete_content):
+    @staticmethod
+    def predict(discrete_content):
         """
-        load labels-dict
+        predict content
         """
-        # self.read_tensor()
+        VocLstm.read_tensor()
 
+        # load reference
         labels_dict = pickle.load(open('reference/labels_dict', 'rb'))
-
-        # load vocab_processor
         vocab_processor = pickle.load(open('reference/vocab_processor', 'rb'))
 
         # trans word to num
@@ -211,10 +215,34 @@ class VocLstm(object):
             print(content, label)
 
 
+class Inference(object):
+    def __init__(self):
+        # load reference
+        self.labels_dict = pickle.load(open('reference/labels_dict', 'rb'))
+        self.vocab_processor = pickle.load(open('reference/vocab_processor', 'rb'))
+
+        # load model
+        self.sess = tf.Session()
+        self.saver = tf.train.import_meta_graph(Config.graph_path)
+        self.saver.restore(self.sess, Config.model_path)
+
+    def predict(self, content):
+        if isinstance(content, str):
+            content = [content]
+        word2nums = list(self.vocab_processor.fit_transform(content))
+        prediction_num = self.sess.run('train/prediction_num:0', feed_dict={'initial/x:0': word2nums})
+        for i, content in enumerate(content):
+            label = self.labels_dict[self.labels_dict['labels_num'] == prediction_num[i]]['labels']
+            print(content, label)
+
+
 if __name__ == '__main__':
-    lc = VocLstm()
-    # lc.initialize_data()
-    # lc.train_model()
-    lc.use_model(np.array(['天 到 ', '买 有点 大 ', '破 裤子 还 不能 处理', '合适', '码 正好 ', '天 就 到 ',
-                           '腰围 裤 长 穿 很 合适 ', '鞋 非常 合适 ', '多 性价比 非常 很 高 ',
-                           '码 合适 裤子 有 弹性', '赞 ', '脚 码 正好 ', '活动 也 给力 ']))
+    if Config.TrainSwtch:
+        lc = VocLstm()
+        lc.initialize_data()
+        lc.train_model()
+
+    inference = Inference()
+    inference.predict(np.array(['天 到 ', '买 有点 大 ', '破 裤子 还 不能 处理', '合适', '码 正好 ', '天 就 到 ',
+                                '腰围 裤 长 穿 很 合适 ', '鞋 非常 合适 ', '多 性价比 非常 很 高 ',
+                                '码 合适 裤子 有 弹性', '赞 ', '脚 码 正好 ', '活动 也 给力 ']))
