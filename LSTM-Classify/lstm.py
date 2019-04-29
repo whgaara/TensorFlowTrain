@@ -29,7 +29,7 @@ class Config(object):
     model_path = os.path.join(path, model_name)
     data_path = os.path.join('data', 'data_lite.csv')
 
-    TrainSwtch = False
+    TrainSwtch = True
 
     @classmethod
     def init_data(cls):
@@ -61,7 +61,7 @@ class VocLstm(object):
         self.source_data['labels_onehot'] = None
         self.source_data['word2vec'] = None
         self.source_data.drop_duplicates(subset=None, keep='first', inplace=True)
-        self.source_data = self.source_data.sort_values(by="content", ascending=False).reset_index().drop('index', axis=1)
+        self.source_data = self.source_data.reset_index().drop('index', axis=1)
 
         # define object variable
         self.num_classes = None
@@ -81,7 +81,7 @@ class VocLstm(object):
                 self.source_data.loc[i, 'labels_num'] = label2num[label]
             else:
                 num += 1
-                label2num[label] = str(num)
+                label2num[label] = num
                 self.source_data.loc[i, 'labels_num'] = label2num[label]
 
         # update labels one-hot
@@ -95,31 +95,6 @@ class VocLstm(object):
                 label2num[label] = num
                 self.source_data.set_value(i, 'labels_onehot', labels_onehot[i])
 
-        # merge same content
-        index = 0
-        while index < len(self.source_data['content']) - 1:
-            j = index + 1
-            if self.source_data['content'][index] != self.source_data['content'][j]:
-                index += 1
-                continue
-            else:
-                while self.source_data['content'][index] == self.source_data['content'][j] and \
-                        self.source_data['labels'][index] != self.source_data['labels'][j]:
-                    tmp_label = self.source_data['labels'][index] + ',' + self.source_data['labels'][j]
-                    self.source_data.set_value(index, 'labels', tmp_label)
-                    print(self.source_data['labels_num'][index] +','+ self.source_data['labels_num'][j])
-                    tmp_label_num = self.source_data['labels_num'][index] + ',' + self.source_data['labels_num'][j]
-                    self.source_data.set_value(index, 'labels_num', tmp_label_num)
-                    onehot_index = np.where(self.source_data['labels_onehot'][j] == 1)
-                    tmp_onehot = self.source_data['labels_onehot'][index]
-                    tmp_onehot[onehot_index] = 1
-                    self.source_data.set_value(index, 'labels_onehot', tmp_onehot)
-                    self.source_data = self.source_data.drop(j)
-                    j += 1
-                index = j + 1
-        # update source data
-        self.source_data = self.source_data.reset_index().drop('index', axis=1)
-
         # trans words to num
         self.content_max_len = max([len(str(content).split(' ')) for content in self.source_data['content']])
         self.vocab_processor = learn.preprocessing.VocabularyProcessor(self.content_max_len)
@@ -128,8 +103,8 @@ class VocLstm(object):
         for i, label in enumerate(self.source_data['content']):
             self.source_data.set_value(i, 'word2vec', content_num[i])
 
-        self.__split_data()
         self.__record_info()
+        self.__split_data()
 
     def __split_data(self):
         """
@@ -219,8 +194,6 @@ class VocLstm(object):
                 # test
                 test_batch_word2vec = self.test['word2vec'].apply(pandas.Series).values
                 test_batch_labels = self.test['labels_onehot'].apply(pandas.Series).values
-                pre = sess.run(prediction_result, feed_dict={x: test_batch_word2vec, y: test_batch_labels,
-                                                             dropout_keep_prob: 1.0})
                 acc = sess.run(accuracy, feed_dict={x: test_batch_word2vec, y: test_batch_labels,
                                                     dropout_keep_prob: 1.0})
                 print('this is the %sth train, %s, acc:' % (epoch + 1, self.current_time), acc)
@@ -263,12 +236,12 @@ class Inference(object):
                 if possibility > VocLstm.judgement:
                     label_num.append(j)
             if not len(label_num):
-                print(sub_content, '未匹配')
+                print('content:%s, label:%s' % (sub_content, ['未匹配']))
                 continue
-            for label in label_num:
-                label = self.labels_dict[self.labels_dict['labels_num'] == label]['labels']
-                label_list.append(label)
-            print(sub_content, label_list)
+            for num in label_num:
+                label = self.labels_dict[self.labels_dict['labels_num'] == num]['labels'].values[0]
+                label_list.append(str(label))
+            print('content:%s, label:%s' % (sub_content, label_list))
 
 
 if __name__ == '__main__':
@@ -278,7 +251,7 @@ if __name__ == '__main__':
         lc.train_model()
 
     inference = Inference()
-    inference.predict(np.array(['天 到 ', '买 有点 大 ', '破 裤子 还 不能 处理', '合适', '码 正好 ', '天 就 到 ',
+    inference.predict(np.array(['天 到 ', '刚刚 好 无 非常 舒适', '破 裤子 还 不能 处理', '合适', '码 正好 ', '天 就 到 ',
                                 '腰围 裤 长 穿 很 合适 ', '鞋 非常 合适 ', '多 性价比 非常 很 高 ',
                                 '码 合适 裤子 有 弹性', '赞 ', '脚 码 正好 ', '活动 也 给力 ', '天上 云 蓝', '屁股 圆圆',
                                 '冉姐 坐 我 对面', '快递 隔天就到 发 顺丰 ']))
