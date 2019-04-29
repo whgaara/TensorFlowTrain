@@ -5,6 +5,7 @@ import os
 import pandas
 import pickle
 import pymysql
+import time
 import numpy as np
 import tensorflow as tf
 
@@ -28,7 +29,7 @@ class Config(object):
     model_path = os.path.join(path, model_name)
     data_path = os.path.join('data', 'data_lite.csv')
 
-    TrainSwtch = False
+    TrainSwtch = True
 
     @classmethod
     def init_data(cls):
@@ -43,12 +44,15 @@ class Config(object):
 
 
 class VocLstm(object):
-    epoch_count = 10
+    epoch_count = 15
     batch_size = 256
     embedding_size = 200
     num_units = 100
     train_rate = 0.9
+    dense_num = 200
     best_acc = 0.0
+    judgement = 0.8
+    dropout_keep_prob = 1.0
 
     def __init__(self):
         # read data
@@ -56,6 +60,8 @@ class VocLstm(object):
         self.source_data['labels_num'] = 0
         self.source_data['labels_onehot'] = None
         self.source_data['word2vec'] = None
+        self.source_data.drop_duplicates(subset=None, keep='first', inplace=True)
+        self.source_data = self.source_data.sort_values(by="content", ascending=False).reset_index().drop('index', axis=1)
 
         # define object variable
         self.num_classes = None
@@ -75,7 +81,7 @@ class VocLstm(object):
                 self.source_data.loc[i, 'labels_num'] = label2num[label]
             else:
                 num += 1
-                label2num[label] = num
+                label2num[label] = str(num)
                 self.source_data.loc[i, 'labels_num'] = label2num[label]
 
         # update labels one-hot
@@ -88,6 +94,31 @@ class VocLstm(object):
                 num += 1
                 label2num[label] = num
                 self.source_data.set_value(i, 'labels_onehot', labels_onehot[i])
+
+        # merge same content
+        index = 0
+        while index < len(self.source_data['content']) - 1:
+            j = index + 1
+            if self.source_data['content'][index] != self.source_data['content'][j]:
+                index += 1
+                continue
+            else:
+                while self.source_data['content'][index] == self.source_data['content'][j] and \
+                        self.source_data['labels'][index] != self.source_data['labels'][j]:
+                    tmp_label = self.source_data['labels'][index] + ',' + self.source_data['labels'][j]
+                    self.source_data.set_value(index, 'labels', tmp_label)
+                    print(self.source_data['labels_num'][index] +','+ self.source_data['labels_num'][j])
+                    tmp_label_num = self.source_data['labels_num'][index] + ',' + self.source_data['labels_num'][j]
+                    self.source_data.set_value(index, 'labels_num', tmp_label_num)
+                    onehot_index = np.where(self.source_data['labels_onehot'][j] == 1)
+                    tmp_onehot = self.source_data['labels_onehot'][index]
+                    tmp_onehot[onehot_index] = 1
+                    self.source_data.set_value(index, 'labels_onehot', tmp_onehot)
+                    self.source_data = self.source_data.drop(j)
+                    j += 1
+                index = j + 1
+        # update source data
+        self.source_data = self.source_data.reset_index().drop('index', axis=1)
 
         # trans words to num
         self.content_max_len = max([len(str(content).split(' ')) for content in self.source_data['content']])
@@ -104,7 +135,7 @@ class VocLstm(object):
         """
         split train-set and test-set
         """
-        # np.random.seed(0)
+        np.random.seed(0)
         train_count = int(len(self.source_data) * VocLstm.train_rate)
         shuffle_index = np.random.permutation(np.arange(len(self.source_data)))
         shuffle_data = self.source_data.loc[shuffle_index]
@@ -135,13 +166,20 @@ class VocLstm(object):
         else:
             return tf.nn.rnn_cell.GRUCell(VocLstm.num_units)
 
+    @property
+    def current_time(self):
+        return time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time()))
+
     def train_model(self):
         with tf.name_scope('initial'):
             x = tf.placeholder(tf.int32, [None, self.content_max_len], name='x')
             y = tf.placeholder(tf.int32, [None, self.num_classes], name='y')
-            weights = tf.Variable(tf.truncated_normal([VocLstm.num_units, self.num_classes], stddev=0.1),
-                                  name='weights')
-            biases = tf.Variable(tf.constant(0.1, shape=[self.num_classes]), name='biases')
+            weights_1 = tf.Variable(tf.truncated_normal([VocLstm.num_units, VocLstm.dense_num], stddev=0.1),
+                                    name='weights_1')
+            biases_1 = tf.Variable(tf.constant(0.1, shape=[VocLstm.dense_num]), name='biases_1')
+            weights_2 = tf.Variable(tf.truncated_normal([VocLstm.dense_num, self.num_classes], stddev=0.1),
+                                    name='weights_2')
+            biases_2 = tf.Variable(tf.constant(0.1, shape=[self.num_classes]), name='biases_2')
             dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
 
         # embedding
@@ -155,9 +193,11 @@ class VocLstm(object):
         with tf.name_scope('train'):
             # lstm_cell = tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=1.0, output_keep_prob=1.0)
             outputs, final_state = tf.nn.dynamic_rnn(self.rnn_cell, input_embedding, dtype=tf.float32)
-            prediction = tf.matmul(final_state[1], weights) + biases
-            prediction_num = tf.arg_max(tf.nn.softmax(prediction), 1, name='prediction_num')
-            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=y, logits=prediction))
+            prediction1 = tf.nn.relu(tf.matmul(final_state[1], weights_1) + biases_1)
+            prediction1_dropout = tf.nn.dropout(prediction1, dropout_keep_prob)
+            prediction2 = tf.matmul(prediction1_dropout, weights_2) + biases_2
+            prediction_num = tf.arg_max(tf.nn.softmax(prediction2), 1, name='prediction_num')
+            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=y, logits=prediction2))
             train_step = tf.train.AdamOptimizer(1e-3).minimize(loss)
 
         # test
@@ -166,21 +206,26 @@ class VocLstm(object):
             accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='accuracy')
 
         with tf.Session() as sess:
+            print('begin to train, time is %s' % self.current_time)
             sess.run(tf.global_variables_initializer())
             saver = tf.train.Saver()
             for epoch in range(VocLstm.epoch_count):
                 for batch in self.__train_batch_iter():
                     batch_word2vec = batch['word2vec'].apply(pandas.Series).values
                     batch_labels = batch['labels_onehot'].apply(pandas.Series).values
-                    sess.run(train_step, feed_dict={x: batch_word2vec, y: batch_labels})
+                    sess.run(train_step, feed_dict={x: batch_word2vec, y: batch_labels,
+                                                    dropout_keep_prob: VocLstm.dropout_keep_prob})
                 # test
                 test_batch_word2vec = self.test['word2vec'].apply(pandas.Series).values
                 test_batch_labels = self.test['labels_onehot'].apply(pandas.Series).values
-                acc = sess.run(accuracy, feed_dict={x: test_batch_word2vec, y: test_batch_labels})
-                print(acc)
+                acc = sess.run(accuracy, feed_dict={x: test_batch_word2vec, y: test_batch_labels,
+                                                    dropout_keep_prob: 1.0})
+
+                print('this is the %sth train, %s, acc:' % (epoch + 1, self.current_time), acc)
                 if acc > VocLstm.best_acc:
                     saver.save(sess, Config.model_path)
                     VocLstm.best_acc = acc
+            print('train end, time is %s' % self.current_time)
 
     @staticmethod
     def read_tensor():
@@ -188,31 +233,6 @@ class VocLstm(object):
         var_to_shape_map = reader.get_variable_to_shape_map()
         for key in var_to_shape_map:
             print("tensor_name: ", key)
-
-    @staticmethod
-    def predict(discrete_content):
-        """
-        predict content
-        """
-        VocLstm.read_tensor()
-
-        # load reference
-        labels_dict = pickle.load(open('reference/labels_dict', 'rb'))
-        vocab_processor = pickle.load(open('reference/vocab_processor', 'rb'))
-
-        # trans word to num
-        if isinstance(discrete_content, str):
-            discrete_content = [discrete_content]
-        word2nums = list(vocab_processor.fit_transform(discrete_content))
-
-        # load model
-        sess = tf.Session()
-        saver = tf.train.import_meta_graph(Config.graph_path)
-        saver.restore(sess, Config.model_path)
-        prediction_num = sess.run('train/prediction_num:0', feed_dict={'initial/x:0': word2nums})
-        for i, content in enumerate(discrete_content):
-            label = labels_dict[labels_dict['labels_num'] == prediction_num[i]]['labels']
-            print(content, label)
 
 
 class Inference(object):
@@ -230,8 +250,18 @@ class Inference(object):
         if isinstance(content, str):
             content = [content]
         word2nums = list(self.vocab_processor.fit_transform(content))
-        prediction_num = self.sess.run('train/prediction_num:0', feed_dict={'initial/x:0': word2nums})
+
+        # get prediction info
+        prediction_value = self.sess.run('train/add_1:0',
+                                         feed_dict={'initial/x:0': word2nums, 'initial/dropout_keep_prob:0': 1.0})
+        prediction_softmax = self.sess.run(tf.nn.softmax(prediction_value))
+        prediction_num = self.sess.run('train/prediction_num:0',
+                                       feed_dict={'initial/x:0': word2nums, 'initial/dropout_keep_prob:0': 1.0})
+
         for i, content in enumerate(content):
+            if max(prediction_softmax[i]) < VocLstm.judgement:
+                print(content, '未匹配')
+                continue
             label = self.labels_dict[self.labels_dict['labels_num'] == prediction_num[i]]['labels']
             print(content, label)
 
@@ -245,4 +275,5 @@ if __name__ == '__main__':
     inference = Inference()
     inference.predict(np.array(['天 到 ', '买 有点 大 ', '破 裤子 还 不能 处理', '合适', '码 正好 ', '天 就 到 ',
                                 '腰围 裤 长 穿 很 合适 ', '鞋 非常 合适 ', '多 性价比 非常 很 高 ',
-                                '码 合适 裤子 有 弹性', '赞 ', '脚 码 正好 ', '活动 也 给力 ']))
+                                '码 合适 裤子 有 弹性', '赞 ', '脚 码 正好 ', '活动 也 给力 ', '天上 云 蓝', '屁股 圆圆',
+                                '冉姐 坐 我 对面', '快递 隔天就到 发 顺丰 ']))
